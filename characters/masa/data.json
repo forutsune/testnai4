@@ -1,8 +1,17 @@
 {
   "name": "マサ",
+  "moveSpeed": 0.8,
   "idle": {
     "frameWidth": 64,
     "frameHeight": 64,
     "frames": 6,
-    "speed": 10
+    "speed": 6
+  },
+
+  "move": {
+    "frameWidth": 64,
+    "frameHeight": 64,
+    "frames": 6,
+    "speed": 6
   }
+}
