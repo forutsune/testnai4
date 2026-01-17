@@ -1,14 +1,9 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+// 4:3 のベース解像度
 const BASE_WIDTH = 64;
-const BASE_HEIGHT = 48; // 64:48 は 4:3 ですが、6:4(3:2)にしたい場合はここを調整します
-// 6:4にするなら 64 x 42.6... ですが、計算しやすい 72:48 などにするか
-// もしくは BASE_WIDTH と BASE_HEIGHT の比率を 6:4 に設定します。
-
-// 比率の定義
-const RATIO_W = 6;
-const RATIO_H = 4;
+const BASE_HEIGHT = 48;
 
 let currentScale = 1;
 
@@ -22,7 +17,7 @@ const input = { left: false, right: false };
 let activeCharacterIndex = 0;
 const characters = [];
 
-// キーボード・スマホ操作部分は変更なしのため省略せず記述
+// --- キーボード・スマホ操作 ---
 window.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") input.left = true;
   if (e.key === "ArrowRight") input.right = true;
@@ -41,43 +36,48 @@ document.getElementById("switchBtn").addEventListener("click", () => {
   activeCharacterIndex = (activeCharacterIndex + 1) % characters.length;
 });
 
-// ★修正：リサイズ関数
+// --- リサイズ（4:3固定） ---
 function resize() {
   const screenW = window.innerWidth;
   const screenH = window.innerHeight;
 
-  // 画面サイズに合わせて、比率(6:4)を維持できる最大のスケールを計算
-  // 整数倍(Math.floor)にするとドットが綺麗ですが、画面にぴったり合わせるならfloorを外します
-  const scaleW = screenW / RATIO_W;
-  const scaleH = screenH / RATIO_H;
-  const scale = Math.floor(Math.min(scaleW, scaleH)); 
+  // ウィンドウに合わせて、4:3を維持できる最大の整数倍（または浮動小数）のスケールを計算
+  // ドット絵の綺麗さを優先して Math.floor を使用
+  const scale = Math.floor(Math.min(screenW / BASE_WIDTH, screenH / BASE_HEIGHT)) || 1;
 
-  // 比率に基づいたキャンバスサイズを設定
-  canvas.width = RATIO_W * scale;
-  canvas.height = RATIO_H * scale;
-  
-  // ゲーム内解像度(64x48など)に対するスケール比率を保持
-  // ここでは BASE_WIDTH を基準にスケールを算出
-  currentScale = canvas.width / BASE_WIDTH;
+  canvas.width = BASE_WIDTH * scale;
+  canvas.height = BASE_HEIGHT * scale;
+  currentScale = scale;
+
+  // キャンバスを画面中央に配置（CSSをJSで制御）
+  canvas.style.position = "absolute";
+  canvas.style.left = "50%";
+  canvas.style.top = "50%";
+  canvas.style.transform = "translate(-50%, -50%)";
 
   ctx.imageSmoothingEnabled = false;
   draw();
 }
 window.addEventListener("resize", resize);
 
+// --- 描画 ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // 背景もキャンバスサイズに合わせて描画
-  ctx.drawImage(bg, 0, 0, bg.width, bg.height, 0, 0, canvas.width, canvas.height);
+  if (bg.complete) {
+    ctx.drawImage(bg, 0, 0, BASE_WIDTH, BASE_HEIGHT, 0, 0, canvas.width, canvas.height);
+  }
 }
 
+// --- キャラクタークラス ---
 class Character {
   constructor(x, y, idleImg, data) {
     this.x = x;
     this.y = y;
     this.idleImg = idleImg;
+    this.moveStateImg = null;
     this.moveImg = null;
     this.data = data;
+
     this.frame = 0;
     this.timer = 0;
     this.dir = 1;
@@ -90,8 +90,16 @@ class Character {
 
   update(isActive = false) {
     const prevState = this.state;
+
     if (isActive && (input.left || input.right)) {
-      this.state = "move";
+      if (this.state === "idle") {
+        this.state = "move_state";
+      } else if (this.state === "move_state") {
+        const anim = this.data["move_state"];
+        if (this.frame === anim.frames - 1 && this.timer === anim.speed - 1) {
+          this.state = "move";
+        }
+      }
     } else {
       this.state = "idle";
     }
@@ -102,12 +110,13 @@ class Character {
     }
 
     if (isActive) {
+      let speed = (this.state === "move") ? this.data.moveSpeed : (this.data.moveInitialSpeed || 0.4);
       if (input.left) {
-        this.x -= this.data.moveSpeed * currentScale;
+        this.x -= speed * currentScale;
         this.dir = -1;
       }
       if (input.right) {
-        this.x += this.data.moveSpeed * currentScale;
+        this.x += speed * currentScale;
         this.dir = 1;
       }
     }
@@ -131,7 +140,15 @@ class Character {
     const fw = anim.frameWidth;
     const fh = anim.frameHeight;
     const scale = currentScale * CHARACTER_SCALE;
-    const currentImg = (this.state === "move" && this.moveImg) ? this.moveImg : this.idleImg;
+
+    let currentImg;
+    if (this.state === "move_state") {
+      currentImg = this.moveStateImg;
+    } else if (this.state === "move") {
+      currentImg = this.moveImg;
+    } else {
+      currentImg = this.idleImg;
+    }
 
     ctx.save();
     ctx.translate(this.x + (fw * scale) / 2, this.y);
@@ -146,38 +163,44 @@ class Character {
   }
 }
 
+// --- キャラクター読み込み ---
 function loadCharacter(path, x, y) {
   return fetch(`${path}/data.json`)
     .then(res => res.json())
     .then(data => {
       const idleImg = new Image();
       idleImg.src = `${path}/idle.png`;
+      const moveStateImg = new Image();
+      moveStateImg.src = `${path}/move_state.png`;
       const moveImg = new Image();
       moveImg.src = `${path}/move.png`;
+
       return new Promise(resolve => {
         let loadedCount = 0;
         const checkLoaded = () => {
           loadedCount++;
-          if (loadedCount === 2) {
+          if (loadedCount === 3) {
             const c = new Character(x, y, idleImg, data);
+            c.moveStateImg = moveStateImg;
             c.moveImg = moveImg;
             resolve(c);
           }
         };
         idleImg.onload = checkLoaded;
+        moveStateImg.onload = checkLoaded;
         moveImg.onload = checkLoaded;
       });
     });
 }
 
+// --- ゲーム開始 ---
 bg.onload = async () => {
   resize();
-  const groundY = canvas.height;
+  const groundY = BASE_HEIGHT * currentScale;
   const charHeight = 64 * currentScale * CHARACTER_SCALE;
 
-  // 初期位置も canvas.width を基準に配置
-  const makoto = await loadCharacter("characters/makoto", canvas.width * 0.2, groundY - charHeight - Y_OFFSET * currentScale);
-  const masa = await loadCharacter("characters/masa", canvas.width * 0.6, groundY - charHeight - Y_OFFSET * currentScale);
+  const makoto = await loadCharacter("characters/makoto", 12 * currentScale, groundY - charHeight - Y_OFFSET * currentScale);
+  const masa = await loadCharacter("characters/masa", 36 * currentScale, groundY - charHeight - Y_OFFSET * currentScale);
 
   characters.push(makoto, masa);
   loop();
