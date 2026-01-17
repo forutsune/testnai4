@@ -1,9 +1,18 @@
 {
   "name": "誠",
+  "moveSpeed": 0.8,
+  "moveInitialSpeed": 0.5,
   "idle": {
     "frameWidth": 64,
     "frameHeight": 64,
     "frames": 6,
-    "speed": 10
+    "speed": 6
+  },
+
+  "move": {
+    "frameWidth": 64,
+    "frameHeight": 64,
+    "frames": 7,
+    "speed": 5
   }
 }
